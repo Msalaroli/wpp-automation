@@ -16,11 +16,14 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 @Slf4j
 @Component
@@ -49,17 +52,39 @@ public class WppJobWorker {
     @Value("${app.worker.locked-by:wpp-automation}")
     private String lockedBy;
 
+    private volatile boolean stopping;
+    private ExecutorService executor;
+
     @PostConstruct
     public void start() {
         if (!enabled) return;
-        var pool = Executors.newFixedThreadPool(threads);
+        executor = Executors.newFixedThreadPool(threads);
         for (int i = 0; i < threads; i++) {
-            pool.submit(this::runLoop);
+            executor.submit(this::runLoop);
+        }
+    }
+
+    @PreDestroy
+    public void stop() {
+        stopping = true;
+        if (executor == null) return;
+
+        executor.shutdown();
+        try {
+            if (!executor.awaitTermination(30, TimeUnit.SECONDS)) {
+                executor.shutdownNow();
+                if (!executor.awaitTermination(10, TimeUnit.SECONDS)) {
+                    log.warn("WPP job worker did not terminate after shutdownNow");
+                }
+            }
+        } catch (InterruptedException ie) {
+            executor.shutdownNow();
+            Thread.currentThread().interrupt();
         }
     }
 
     private void runLoop() {
-        while (true) {
+        while (!stopping) {
             try {
                 boolean didWork = processOneJob();
                 if (!didWork) Thread.sleep(pollDelayMs);
