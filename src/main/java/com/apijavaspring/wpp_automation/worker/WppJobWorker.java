@@ -6,6 +6,8 @@ import com.apijavaspring.wpp_automation.persistence.DocUploadRepository;
 import com.apijavaspring.wpp_automation.persistence.MessageQueueRepository;
 import com.apijavaspring.wpp_automation.persistence.N8nJobRepository;
 import com.apijavaspring.wpp_automation.persistence.ReservationRepository;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -17,6 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -31,6 +34,7 @@ import java.util.concurrent.TimeUnit;
 public class WppJobWorker {
 
     private final NamedParameterJdbcTemplate jdbc;
+    private final ObjectMapper objectMapper;
 
     private final WppAutomationProperties properties;
     private final ReservationRepository reservationRepository;
@@ -162,13 +166,12 @@ public class WppJobWorker {
     private void handleCommercialCommand(String waId, InboxRow inbox) {
         if (!"text".equals(safe(inbox.messageType()))) return;
 
-        String payloadJson =
-                "{"
-                        + "\"wa_id\":\"" + esc(waId) + "\","
-                        + "\"inbox_id\":\"" + inbox.id() + "\","
-                        + "\"message_id\":\"" + esc(inbox.messageId()) + "\","
-                        + "\"text\":\"" + esc(inbox.textBody()) + "\""
-                        + "}";
+        String payloadJson = payloadJson(
+                "wa_id", waId,
+                "inbox_id", inbox.id(),
+                "message_id", inbox.messageId(),
+                "text", inbox.textBody()
+        );
 
         n8nJobRepository.enqueueCommercialCommandJob(
                 inbox.id(),
@@ -249,13 +252,12 @@ public class WppJobWorker {
             return;
         }
 
-        String payloadJson =
-                "{"
-                        + "\"wa_id\":\"" + esc(conv.waId()) + "\","
-                        + "\"inbox_id\":\"" + inbox.id() + "\","
-                        + "\"message_id\":\"" + esc(inbox.messageId()) + "\","
-                        + "\"text\":\"" + esc(inbox.textBody()) + "\""
-                        + "}";
+        String payloadJson = payloadJson(
+                "wa_id", conv.waId(),
+                "inbox_id", inbox.id(),
+                "message_id", inbox.messageId(),
+                "text", inbox.textBody()
+        );
 
         n8nJobRepository.enqueueUnknownReservationLookupJob(
                 inbox.id(),
@@ -290,16 +292,15 @@ public class WppJobWorker {
                     inbox.mediaSha256()
             );
 
-            String payloadJson =
-                    "{"
-                            + "\"upload_id\":\"" + uploadId + "\","
-                            + "\"reservation_id\":\"" + esc(conv.reservationId()) + "\","
-                            + "\"wa_id\":\"" + esc(conv.waId()) + "\","
-                            + "\"message_id\":\"" + esc(inbox.messageId()) + "\","
-                            + "\"media_id\":\"" + esc(inbox.mediaId()) + "\","
-                            + "\"mime_type\":\"" + esc(inbox.mimeType()) + "\","
-                            + "\"sha256\":\"" + esc(inbox.mediaSha256()) + "\""
-                            + "}";
+            String payloadJson = payloadJson(
+                    "upload_id", uploadId,
+                    "reservation_id", conv.reservationId(),
+                    "wa_id", conv.waId(),
+                    "message_id", inbox.messageId(),
+                    "media_id", inbox.mediaId(),
+                    "mime_type", inbox.mimeType(),
+                    "sha256", inbox.mediaSha256()
+            );
 
             n8nJobRepository.enqueueDownloadMediaJob(
                     uploadId,
@@ -312,14 +313,13 @@ public class WppJobWorker {
         }
 
         if ("text".equals(safe(inbox.messageType()))) {
-            String payloadJson =
-                    "{"
-                            + "\"reservation_id\":\"" + esc(conv.reservationId()) + "\","
-                            + "\"wa_id\":\"" + esc(conv.waId()) + "\","
-                            + "\"inbox_id\":\"" + inbox.id() + "\","
-                            + "\"message_id\":\"" + esc(inbox.messageId()) + "\","
-                            + "\"text\":\"" + esc(inbox.textBody()) + "\""
-                            + "}";
+            String payloadJson = payloadJson(
+                    "reservation_id", conv.reservationId(),
+                    "wa_id", conv.waId(),
+                    "inbox_id", inbox.id(),
+                    "message_id", inbox.messageId(),
+                    "text", inbox.textBody()
+            );
 
             n8nJobRepository.enqueueCollectingDocsTextJob(
                     inbox.id(),
@@ -336,11 +336,10 @@ public class WppJobWorker {
 
         String reservationId = conv.reservationId();
 
-        String payloadJson =
-                "{"
-                        + "\"reservation_id\":\"" + esc(reservationId) + "\","
-                        + "\"wa_id\":\"" + esc(conv.waId()) + "\""
-                        + "}";
+        String payloadJson = payloadJson(
+                "reservation_id", reservationId,
+                "wa_id", conv.waId()
+        );
 
         n8nJobRepository.enqueueFaqIaOpenJob(
                 reservationId,
@@ -406,9 +405,22 @@ public class WppJobWorker {
         return s == null ? "" : s;
     }
 
-    private static String esc(String s) {
-        if (s == null) return "";
-        return s.replace("\\", "\\\\").replace("\"", "\\\"");
+    private String payloadJson(Object... fields) {
+        LinkedHashMap<String, String> payload = new LinkedHashMap<>();
+        for (int i = 0; i < fields.length; i += 2) {
+            payload.put((String) fields[i], stringify(fields[i + 1]));
+        }
+
+        try {
+            return objectMapper.writeValueAsString(payload);
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("Failed to build n8n job payload", e);
+        }
+    }
+
+    private static String stringify(Object value) {
+        if (value == null) return "";
+        return value.toString();
     }
 
     private JobRow pickNextJob() {
