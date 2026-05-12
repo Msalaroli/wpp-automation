@@ -38,19 +38,21 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics
+        include: health,info
   endpoint:
     health:
       probes:
         enabled: true
-      show-details: always
+      show-details: never
 
 logging:
   level:
     root: INFO
-    org.springframework.web: INFO
-    org.springframework.jdbc.core: INFO
-    com.apijavaspring: DEBUG
+    org.springframework: WARN
+    org.springframework.jdbc: WARN
+    org.flywaydb: WARN
+    com.zaxxer.hikari: WARN
+    com.apijavaspring: INFO
 
 app:
   meta:
