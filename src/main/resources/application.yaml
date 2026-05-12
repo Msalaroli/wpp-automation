@@ -7,7 +7,7 @@ server:
     connection-timeout: 2s
     accesslog:
       enabled: true
-      pattern: '%t %a "%r" %s %b %Dms'
+      pattern: '%t %a "%m %U %H" %s %b %Dms'
 
 spring:
   application:
