@@ -565,6 +565,8 @@ public class WppJobWorker {
                 """
                 UPDATE ops.wpp_jobs
                 SET status = 'ok',
+                    locked_at = null,
+                    locked_by = null,
                     updated_at = now()
                 WHERE id = :id
                 """,
@@ -579,6 +581,8 @@ public class WppJobWorker {
                 SET status = CASE WHEN attempts + 1 >= 5 THEN 'falha_final' ELSE 'erro' END,
                     attempts = attempts + 1,
                     last_error = left(:err, 1000),
+                    locked_at = null,
+                    locked_by = null,
                     run_after = now() + make_interval(secs => 10 * (attempts + 1)),
                     updated_at = now()
                 WHERE id = :id
