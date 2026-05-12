@@ -1,0 +1,75 @@
+HELP.md
+
+### Maven / Java ###
+target/
+*.class
+.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+### STS ###
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+
+### IntelliJ IDEA ###
+.idea/
+*.iws
+*.iml
+*.ipr
+
+### NetBeans ###
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+build/
+!**/src/main/**/build/
+!**/src/test/**/build/
+
+### VS Code ###
+.vscode/
+
+### Env / secrets ###
+.env
+.env.*
+!.env.example
+
+application-local.yml
+application-local.yaml
+application-local.properties
+application-prod.yml
+application-prod.yaml
+application-prod.properties
+
+*.pem
+*.p12
+*.pfx
+*.key
+*.crt
+*.cer
+credentials.json
+service-account*.json
+*service*account*.json
+google-credentials*.json
+
+### Logs ###
+logs/
+*.log
+
+### Database dumps / backups ###
+*.sql
+*.dump
+*.backup
+backup/
+backups/
+dumps/
+
+### OS ###
+.DS_Store
+Thumbs.db
