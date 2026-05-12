@@ -386,17 +386,26 @@ public class WppJobWorker {
     private JobRow pickNextJob() {
         List<JobRow> rows = jdbc.query(
                 """
-                SELECT id, inbox_id, wa_id, attempts
-                FROM ops.wpp_jobs
-                WHERE status IN ('pendente','erro')
-                  AND job_type = 'process_inbox'
-                  AND run_after <= now()
-                  AND attempts < 5
-                ORDER BY created_at ASC, id ASC
-                LIMIT 1
-                FOR UPDATE SKIP LOCKED
+                UPDATE ops.wpp_jobs j
+                SET status = 'processando',
+                    locked_at = now(),
+                    locked_by = :lockedBy,
+                    updated_at = now()
+                FROM (
+                    SELECT id
+                    FROM ops.wpp_jobs
+                    WHERE status IN ('pendente','erro')
+                      AND job_type = 'process_inbox'
+                      AND run_after <= now()
+                      AND attempts < 5
+                    ORDER BY created_at ASC, id ASC
+                    LIMIT 1
+                    FOR UPDATE SKIP LOCKED
+                ) next_job
+                WHERE j.id = next_job.id
+                RETURNING j.id, j.inbox_id, j.wa_id, j.attempts
                 """,
-                new MapSqlParameterSource(),
+                new MapSqlParameterSource().addValue("lockedBy", lockedBy),
                 (rs, n) -> new JobRow(
                         (UUID) rs.getObject("id"),
                         (UUID) rs.getObject("inbox_id"),
@@ -406,24 +415,7 @@ public class WppJobWorker {
         );
 
         if (rows.isEmpty()) return null;
-
-        JobRow job = rows.get(0);
-
-        jdbc.update(
-                """
-                UPDATE ops.wpp_jobs
-                SET status = 'processando',
-                    locked_at = now(),
-                    locked_by = :lockedBy,
-                    updated_at = now()
-                WHERE id = :id
-                """,
-                new MapSqlParameterSource()
-                        .addValue("id", job.jobId())
-                        .addValue("lockedBy", lockedBy)
-        );
-
-        return job;
+        return rows.get(0);
     }
 
     private InboxRow loadInbox(UUID inboxId) {
