@@ -7,9 +7,11 @@ import com.apijavaspring.wpp_automation.persistence.MessageQueueRepository;
 import com.apijavaspring.wpp_automation.persistence.N8nJobRepository;
 import com.apijavaspring.wpp_automation.persistence.ReservationRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -20,6 +22,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Executors;
 
+@Slf4j
 @Component
 @RequiredArgsConstructor
 public class WppJobWorker {
@@ -416,6 +419,31 @@ public class WppJobWorker {
 
         if (rows.isEmpty()) return null;
         return rows.get(0);
+    }
+
+    @Scheduled(fixedDelay = 300_000)
+    public void reapStuckJobs() {
+        int affected = jdbc.update(
+                """
+                UPDATE ops.wpp_jobs
+                SET status = CASE WHEN attempts + 1 >= 5 THEN 'falha_final' ELSE 'erro' END,
+                    attempts = attempts + 1,
+                    locked_at = null,
+                    locked_by = null,
+                    run_after = CASE
+                        WHEN attempts + 1 >= 5 THEN run_after
+                        ELSE now() + make_interval(secs => 10 * (attempts + 1))
+                    END,
+                    updated_at = now()
+                WHERE status = 'processando'
+                  AND locked_at < now() - interval '5 minutes'
+                """,
+                new MapSqlParameterSource()
+        );
+
+        if (affected > 0) {
+            log.warn("WPP job reaper affectedJobs={}", affected);
+        }
     }
 
     private InboxRow loadInbox(UUID inboxId) {
