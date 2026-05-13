@@ -1,0 +1,20 @@
+services:
+  wpp-automation:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: bemvindo/wpp-automation:local
+    container_name: bemvindo-java-local
+    env_file:
+      - .env
+    environment:
+      DB_URL: jdbc:postgresql://stays-db:5432/stays
+    ports:
+      - "127.0.0.1:8080:8080"
+    restart: unless-stopped
+    networks:
+      - app-net
+
+networks:
+  app-net:
+    external: true
