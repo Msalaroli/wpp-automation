@@ -21,6 +21,7 @@ public class N8nJobRepository {
                 VALUES
                   ('download_media', 'doc_uploads', :refId, :reservationId, :waId, CAST(:payload AS jsonb),
                    'pendente', 0, now(), now(), now())
+                ON CONFLICT (job_type, ref_table, ref_id) DO NOTHING
                 """,
                 new MapSqlParameterSource()
                         .addValue("refId", uploadId)

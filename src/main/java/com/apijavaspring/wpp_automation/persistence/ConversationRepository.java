@@ -116,6 +116,28 @@ public class ConversationRepository {
         return updated == 1;
     }
 
+    public boolean replaceReservationAndResetState(String waId, String reservationId, String listingId, String newState) {
+        int updated = jdbc.update(
+                """
+                UPDATE ops.conversations
+                SET reservation_id = :reservationId,
+                    listing_id     = :listingId,
+                    state          = :newState,
+                    human_handoff  = false,
+                    updated_at     = now(),
+                    version        = version + 1
+                WHERE wa_id = :waId
+                  AND reservation_id IS DISTINCT FROM :reservationId
+                """,
+                new MapSqlParameterSource()
+                        .addValue("waId", waId)
+                        .addValue("reservationId", reservationId)
+                        .addValue("listingId", listingId)
+                        .addValue("newState", newState)
+        );
+        return updated == 1;
+    }
+
     public record Conversation(
             String waId,
             String reservationId,

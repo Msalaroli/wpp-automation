@@ -127,16 +127,30 @@ public class WppJobWorker {
             // Human handoff: se atendimento humano está ativo, não empilha nada
             var currentConv = conversationRepository.findByWaId(job.waId());
             if (currentConv != null && currentConv.humanHandoff()) {
-                markInboxProcessed(inboxId);
-                markJobOk(job.jobId());
-                return true;
+                if (tryReactivateForNewReservation(job.waId(), currentConv, isExpiredOrOrphaned(currentConv))) {
+                    currentConv = conversationRepository.findByWaId(job.waId());
+                } else {
+                    markInboxProcessed(inboxId);
+                    markJobOk(job.jobId());
+                    return true;
+                }
             }
 
-            // Pós-checkout expirado: não automatiza mais nada
+            // Pós-checkout expirado: não automatiza mais nada, exceto nova reserva no mesmo WhatsApp
             if (currentConv != null && "post_checkout_expired".equals(safe(currentConv.state()))) {
-                markInboxProcessed(inboxId);
-                markJobOk(job.jobId());
-                return true;
+                if (tryReactivateForNewReservation(job.waId(), currentConv, true)) {
+                    currentConv = conversationRepository.findByWaId(job.waId());
+                } else {
+                    markInboxProcessed(inboxId);
+                    markJobOk(job.jobId());
+                    return true;
+                }
+            }
+
+            if (currentConv != null && shouldReactivateActiveExpiredConversation(currentConv)) {
+                if (tryReactivateForNewReservation(job.waId(), currentConv, true)) {
+                    currentConv = conversationRepository.findByWaId(job.waId());
+                }
             }
 
             // 2) identifica reserva se ainda não identificou
@@ -161,6 +175,49 @@ public class WppJobWorker {
             handleJobError(job.jobId(), e);
             return true;
         }
+    }
+
+    private boolean tryReactivateForNewReservation(String waIdRaw, ConversationRepository.Conversation conv, boolean canReactivate) {
+        if (!canReactivate) return false;
+
+        var ref = reservationRepository.findCurrentOrFutureByHolderPhone(waIdRaw);
+        if (ref == null) return false;
+        if (safe(ref.reservationId()).equals(safe(conv.reservationId()))) return false;
+
+        boolean changed = conversationRepository.replaceReservationAndResetState(
+                waIdRaw,
+                ref.reservationId(),
+                ref.listingId(),
+                "collecting_docs_init"
+        );
+
+        if (changed) {
+            messageQueueRepository.enqueueRealtimeEvent(
+                    ref.reservationId(),
+                    digitsOnly(waIdRaw),
+                    ref.holderName(),
+                    "collecting_docs_init",
+                    "{}"
+            );
+        }
+
+        return changed;
+    }
+
+    private boolean shouldReactivateActiveExpiredConversation(ConversationRepository.Conversation conv) {
+        return isReactivationCandidateState(conv.state()) && isExpiredOrOrphaned(conv);
+    }
+
+    private boolean isReactivationCandidateState(String state) {
+        return switch (safe(state)) {
+            case "collecting_docs_init", "collecting_docs_waiting", "faq_ia" -> true;
+            default -> false;
+        };
+    }
+
+    private boolean isExpiredOrOrphaned(ConversationRepository.Conversation conv) {
+        if ("post_checkout_expired".equals(safe(conv.state()))) return true;
+        return reservationRepository.isMissingOrCheckedOutBeforeToday(conv.reservationId());
     }
 
     private void handleCommercialCommand(String waId, InboxRow inbox) {

@@ -47,6 +47,65 @@ public class ReservationRepository {
         return rows.isEmpty() ? null : rows.get(0);
     }
 
+    public ReservationRef findCurrentOrFutureByHolderPhone(String waIdRaw) {
+        String digits = onlyDigits(waIdRaw);
+        if (digits.isBlank()) return null;
+
+        Set<String> variants = phoneVariants(digits);
+        if (variants.isEmpty()) return null;
+
+        var rows = jdbc.query(
+                """
+                SELECT reservation_id, listing_id, holder_name, holder_phone
+                FROM public.stays_reservas
+                WHERE regexp_replace(holder_phone, '\\D', '', 'g') IN (:phoneDigitsList)
+                  AND checkout_date >= current_date
+                ORDER BY
+                  CASE
+                    WHEN checkin_date <= now() AND checkout_date >= current_date THEN 0
+                    WHEN checkin_date >= now() THEN 1
+                    ELSE 2
+                  END,
+                  ABS(EXTRACT(EPOCH FROM (checkin_date - now())))
+                LIMIT 1
+                """,
+                new MapSqlParameterSource()
+                        .addValue("phoneDigitsList", variants),
+                (rs, n) -> new ReservationRef(
+                        rs.getString("reservation_id"),
+                        rs.getString("listing_id"),
+                        rs.getString("holder_name"),
+                        rs.getString("holder_phone")
+                )
+        );
+
+        return rows.isEmpty() ? null : rows.get(0);
+    }
+
+    public boolean isMissingOrCheckedOutBeforeToday(String reservationId) {
+        if (reservationId == null || reservationId.isBlank()) return false;
+
+        Boolean missingOrCheckedOut = jdbc.queryForObject(
+                """
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM public.stays_reservas
+                    WHERE reservation_id = :reservationId
+                      AND checkout_date < current_date
+                )
+                OR NOT EXISTS (
+                    SELECT 1
+                    FROM public.stays_reservas
+                    WHERE reservation_id = :reservationId
+                )
+                """,
+                new MapSqlParameterSource().addValue("reservationId", reservationId),
+                Boolean.class
+        );
+
+        return Boolean.TRUE.equals(missingOrCheckedOut);
+    }
+
     private static String onlyDigits(String s) {
         return s == null ? "" : s.replaceAll("\\D", "");
     }
