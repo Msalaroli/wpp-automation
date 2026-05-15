@@ -82,28 +82,28 @@ public class ReservationRepository {
         return rows.isEmpty() ? null : rows.get(0);
     }
 
-    public boolean isMissingOrCheckedOutBeforeToday(String reservationId) {
+    public boolean isReservationOperational(String reservationId, boolean allowPostCheckoutSupportWindow) {
         if (reservationId == null || reservationId.isBlank()) return false;
 
-        Boolean missingOrCheckedOut = jdbc.queryForObject(
+        Boolean operational = jdbc.queryForObject(
                 """
                 SELECT EXISTS (
                     SELECT 1
                     FROM public.stays_reservas
                     WHERE reservation_id = :reservationId
-                      AND checkout_date < current_date
-                )
-                OR NOT EXISTS (
-                    SELECT 1
-                    FROM public.stays_reservas
-                    WHERE reservation_id = :reservationId
+                      AND (
+                        (:allowPostCheckoutSupportWindow = true AND checkout_date >= current_date - 1)
+                        OR (:allowPostCheckoutSupportWindow = false AND checkout_date >= current_date)
+                      )
                 )
                 """,
-                new MapSqlParameterSource().addValue("reservationId", reservationId),
+                new MapSqlParameterSource()
+                        .addValue("reservationId", reservationId)
+                        .addValue("allowPostCheckoutSupportWindow", allowPostCheckoutSupportWindow),
                 Boolean.class
         );
 
-        return Boolean.TRUE.equals(missingOrCheckedOut);
+        return Boolean.TRUE.equals(operational);
     }
 
     private static String onlyDigits(String s) {

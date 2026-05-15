@@ -138,6 +138,29 @@ public class ConversationRepository {
         return updated == 1;
     }
 
+    public boolean resetToUnknownReservation(String waId) {
+        int updated = jdbc.update(
+                """
+                UPDATE ops.conversations
+                SET reservation_id = null,
+                    listing_id     = null,
+                    state          = 'unknown_reservation',
+                    human_handoff  = false,
+                    updated_at     = now(),
+                    version        = version + 1
+                WHERE wa_id = :waId
+                  AND (
+                    reservation_id IS NOT NULL
+                    OR listing_id IS NOT NULL
+                    OR state <> 'unknown_reservation'
+                    OR human_handoff = true
+                  )
+                """,
+                new MapSqlParameterSource().addValue("waId", waId)
+        );
+        return updated == 1;
+    }
+
     public record Conversation(
             String waId,
             String reservationId,

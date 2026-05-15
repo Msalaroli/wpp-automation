@@ -127,7 +127,7 @@ public class WppJobWorker {
             // Human handoff: se atendimento humano está ativo, não empilha nada
             var currentConv = conversationRepository.findByWaId(job.waId());
             if (currentConv != null && currentConv.humanHandoff()) {
-                if (tryReactivateForNewReservation(job.waId(), currentConv, isExpiredOrOrphaned(currentConv))) {
+                if (handleExpiredOrOrphanedConversation(job.waId(), currentConv)) {
                     currentConv = conversationRepository.findByWaId(job.waId());
                 } else {
                     markInboxProcessed(inboxId);
@@ -138,17 +138,12 @@ public class WppJobWorker {
 
             // Pós-checkout expirado: não automatiza mais nada, exceto nova reserva no mesmo WhatsApp
             if (currentConv != null && "post_checkout_expired".equals(safe(currentConv.state()))) {
-                if (tryReactivateForNewReservation(job.waId(), currentConv, true)) {
-                    currentConv = conversationRepository.findByWaId(job.waId());
-                } else {
-                    markInboxProcessed(inboxId);
-                    markJobOk(job.jobId());
-                    return true;
-                }
+                handleExpiredOrOrphanedConversation(job.waId(), currentConv);
+                currentConv = conversationRepository.findByWaId(job.waId());
             }
 
-            if (currentConv != null && shouldReactivateActiveExpiredConversation(currentConv)) {
-                if (tryReactivateForNewReservation(job.waId(), currentConv, true)) {
+            if (currentConv != null && isExpiredOrOrphaned(currentConv)) {
+                if (handleExpiredOrOrphanedConversation(job.waId(), currentConv)) {
                     currentConv = conversationRepository.findByWaId(job.waId());
                 }
             }
@@ -177,12 +172,14 @@ public class WppJobWorker {
         }
     }
 
-    private boolean tryReactivateForNewReservation(String waIdRaw, ConversationRepository.Conversation conv, boolean canReactivate) {
-        if (!canReactivate) return false;
-
+    private boolean handleExpiredOrOrphanedConversation(String waIdRaw, ConversationRepository.Conversation conv) {
         var ref = reservationRepository.findCurrentOrFutureByHolderPhone(waIdRaw);
-        if (ref == null) return false;
-        if (safe(ref.reservationId()).equals(safe(conv.reservationId()))) return false;
+        if (ref == null) {
+            return resetToUnknownReservation(waIdRaw);
+        }
+        if (safe(ref.reservationId()).equals(safe(conv.reservationId()))) {
+            return false;
+        }
 
         boolean changed = conversationRepository.replaceReservationAndResetState(
                 waIdRaw,
@@ -204,8 +201,31 @@ public class WppJobWorker {
         return changed;
     }
 
-    private boolean shouldReactivateActiveExpiredConversation(ConversationRepository.Conversation conv) {
-        return isReactivationCandidateState(conv.state()) && isExpiredOrOrphaned(conv);
+    private boolean resetToUnknownReservation(String waIdRaw) {
+        boolean changed = conversationRepository.resetToUnknownReservation(waIdRaw);
+        if (changed) {
+            messageQueueRepository.enqueueRealtimeEvent(
+                    null,
+                    digitsOnly(waIdRaw),
+                    null,
+                    "unknown_reservation",
+                    "{}"
+            );
+        }
+        return changed;
+    }
+
+    private boolean isExpiredOrOrphaned(ConversationRepository.Conversation conv) {
+        if ("post_checkout_expired".equals(safe(conv.state()))) return true;
+        if (!isReactivationCandidateState(conv.state()) && !conv.humanHandoff()) return false;
+        return !reservationRepository.isReservationOperational(
+                conv.reservationId(),
+                usesPostCheckoutSupportWindow(conv)
+        );
+    }
+
+    private boolean usesPostCheckoutSupportWindow(ConversationRepository.Conversation conv) {
+        return conv.humanHandoff() || "faq_ia".equals(safe(conv.state()));
     }
 
     private boolean isReactivationCandidateState(String state) {
@@ -213,11 +233,6 @@ public class WppJobWorker {
             case "collecting_docs_init", "collecting_docs_waiting", "faq_ia" -> true;
             default -> false;
         };
-    }
-
-    private boolean isExpiredOrOrphaned(ConversationRepository.Conversation conv) {
-        if ("post_checkout_expired".equals(safe(conv.state()))) return true;
-        return reservationRepository.isMissingOrCheckedOutBeforeToday(conv.reservationId());
     }
 
     private void handleCommercialCommand(String waId, InboxRow inbox) {
@@ -265,9 +280,9 @@ public class WppJobWorker {
             return;
         }
 
-        var ref = reservationRepository.findByHolderPhone(waIdRaw);
-        if (ref == null) ref = reservationRepository.findByHolderPhone("+" + waDigits);
-        if (ref == null) ref = reservationRepository.findByHolderPhone(waDigits);
+        var ref = reservationRepository.findCurrentOrFutureByHolderPhone(waIdRaw);
+        if (ref == null) ref = reservationRepository.findCurrentOrFutureByHolderPhone("+" + waDigits);
+        if (ref == null) ref = reservationRepository.findCurrentOrFutureByHolderPhone(waDigits);
 
         if (ref == null) {
             boolean changed = conversationRepository.setStateIfChanged(waIdRaw, "unknown_reservation");
