@@ -1,19 +1,26 @@
 package com.apijavaspring.wpp_automation.persistence;
 
+import com.apijavaspring.wpp_automation.config.WppAutomationProperties;
 import com.apijavaspring.wpp_automation.web.dto.InboundEvent;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.util.UUID;
 
 @Repository
 @RequiredArgsConstructor
+@Slf4j
 public class InboxRepository {
 
     private final NamedParameterJdbcTemplate jdbc;
+    private final ChatwootInboundQueueRepository chatwootInboundQueueRepository;
+    private final WppAutomationProperties properties;
 
     @Transactional
     public UUID saveInboxAndEnqueueJob(InboundEvent e) {
@@ -58,6 +65,8 @@ public class InboxRepository {
             throw new IllegalStateException("Inbox id not found for message_id=" + e.messageId());
         }
 
+        enqueueChatwootInboundMirrorSafely(inboxId);
+
         jdbc.update(
                 """
                 INSERT INTO ops.wpp_jobs
@@ -74,4 +83,31 @@ public class InboxRepository {
         return inboxId;
     }
 
+    private void enqueueChatwootInboundMirrorSafely(UUID inboxId) {
+        if (!properties.getChatwoot().isMirrorInboundEnabled()) {
+            log.debug("Chatwoot inbound mirror disabled inboxId={}", inboxId);
+            return;
+        }
+
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    enqueueChatwootInboundMirrorNow(inboxId);
+                }
+            });
+            return;
+        }
+
+        enqueueChatwootInboundMirrorNow(inboxId);
+    }
+
+    private void enqueueChatwootInboundMirrorNow(UUID inboxId) {
+        try {
+            int inserted = chatwootInboundQueueRepository.enqueueChatwootInboundMirror(inboxId);
+            log.debug("Chatwoot inbound mirror enqueue inboxId={} inserted={}", inboxId, inserted);
+        } catch (Exception ex) {
+            log.warn("Failed to enqueue Chatwoot inbound mirror inboxId={}", inboxId, ex);
+        }
+    }
 }

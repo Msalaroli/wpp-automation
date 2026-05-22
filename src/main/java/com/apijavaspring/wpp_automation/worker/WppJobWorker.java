@@ -1,6 +1,7 @@
 package com.apijavaspring.wpp_automation.worker;
 
 import com.apijavaspring.wpp_automation.config.WppAutomationProperties;
+import com.apijavaspring.wpp_automation.core.PhoneNumberVariants;
 import com.apijavaspring.wpp_automation.persistence.ConversationRepository;
 import com.apijavaspring.wpp_automation.persistence.DocUploadRepository;
 import com.apijavaspring.wpp_automation.persistence.MessageQueueRepository;
@@ -20,9 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -121,14 +120,22 @@ public class WppJobWorker {
                 return true;
             }
 
+            String canonicalWaId = resolveConversationWaId(job.waId());
+
             // 1) sempre atualiza janela e last_user_message_at
-            upsertConversation(job.waId(), inbox.receivedAtEpochSeconds());
+            upsertConversation(canonicalWaId, inbox.receivedAtEpochSeconds());
 
             // Human handoff: se atendimento humano está ativo, não empilha nada
-            var currentConv = conversationRepository.findByWaId(job.waId());
+            var currentConv = conversationRepository.findByWaId(canonicalWaId);
             if (currentConv != null && currentConv.humanHandoff()) {
-                if (handleExpiredOrOrphanedConversation(job.waId(), currentConv)) {
-                    currentConv = conversationRepository.findByWaId(job.waId());
+                if (!notBlank(currentConv.reservationId())) {
+                    markInboxProcessed(inboxId);
+                    markJobOk(job.jobId());
+                    return true;
+                }
+
+                if (handleExpiredOrOrphanedConversation(canonicalWaId, currentConv)) {
+                    currentConv = conversationRepository.findByWaId(canonicalWaId);
                 } else {
                     markInboxProcessed(inboxId);
                     markJobOk(job.jobId());
@@ -138,21 +145,21 @@ public class WppJobWorker {
 
             // Pós-checkout expirado: não automatiza mais nada, exceto nova reserva no mesmo WhatsApp
             if (currentConv != null && "post_checkout_expired".equals(safe(currentConv.state()))) {
-                handleExpiredOrOrphanedConversation(job.waId(), currentConv);
-                currentConv = conversationRepository.findByWaId(job.waId());
+                handleExpiredOrOrphanedConversation(canonicalWaId, currentConv);
+                currentConv = conversationRepository.findByWaId(canonicalWaId);
             }
 
             if (currentConv != null && isExpiredOrOrphaned(currentConv)) {
-                if (handleExpiredOrOrphanedConversation(job.waId(), currentConv)) {
-                    currentConv = conversationRepository.findByWaId(job.waId());
+                if (handleExpiredOrOrphanedConversation(canonicalWaId, currentConv)) {
+                    currentConv = conversationRepository.findByWaId(canonicalWaId);
                 }
             }
 
             // 2) identifica reserva se ainda não identificou
-            handleIdentifyAndStartFlow(job.waId());
+            handleIdentifyAndStartFlow(canonicalWaId);
 
             // 3) carrega conversa atualizada e executa regras por estado
-            var conv = conversationRepository.findByWaId(job.waId());
+            var conv = conversationRepository.findByWaId(canonicalWaId);
             if (conv != null) {
                 handleUnknownReservationInbound(conv, inbox);
                 handleDocsInbound(conv, inbox);
@@ -170,6 +177,13 @@ public class WppJobWorker {
             handleJobError(job.jobId(), e);
             return true;
         }
+    }
+
+    private String resolveConversationWaId(String waIdRaw) {
+        List<String> variants = PhoneNumberVariants.brazilianVariants(waIdRaw);
+        var existing = conversationRepository.findByWaIdVariants(variants);
+        if (existing != null) return existing.waId();
+        return digitsOnly(waIdRaw);
     }
 
     private boolean handleExpiredOrOrphanedConversation(String waIdRaw, ConversationRepository.Conversation conv) {
@@ -253,10 +267,10 @@ public class WppJobWorker {
     }
 
     private boolean isCommercialNumber(String waIdRaw) {
-        Set<String> incomingVariants = phoneVariants(waIdRaw);
+        List<String> incomingVariants = PhoneNumberVariants.brazilianVariants(waIdRaw);
 
         for (String allowed : properties.getCommercial().getAllowedNumbers()) {
-            Set<String> allowedVariants = phoneVariants(allowed);
+            List<String> allowedVariants = PhoneNumberVariants.brazilianVariants(allowed);
 
             for (String variant : incomingVariants) {
                 if (allowedVariants.contains(variant)) {
@@ -421,52 +435,7 @@ public class WppJobWorker {
     }
 
     private static String digitsOnly(String s) {
-        if (s == null) return "";
-        return s.replaceAll("\\D", "");
-    }
-
-    private static Set<String> phoneVariants(String raw) {
-        LinkedHashSet<String> out = new LinkedHashSet<>();
-
-        String d = digitsOnly(raw);
-        if (d.isBlank()) return out;
-
-        out.add(d);
-
-        if (d.startsWith("55")) {
-            String local = d.substring(2);
-            out.add(local);
-
-            if (local.matches("^\\d{2}9\\d{8}$")) {
-                String withoutNine = local.substring(0, 2) + local.substring(3);
-                out.add(withoutNine);
-                out.add("55" + withoutNine);
-            }
-
-            if (local.matches("^\\d{2}\\d{8}$")) {
-                String withNine = local.substring(0, 2) + "9" + local.substring(2);
-                out.add(withNine);
-                out.add("55" + withNine);
-            }
-
-            return out;
-        }
-
-        if (d.matches("^\\d{2}9\\d{8}$")) {
-            String withoutNine = d.substring(0, 2) + d.substring(3);
-            out.add(withoutNine);
-            out.add("55" + d);
-            out.add("55" + withoutNine);
-        }
-
-        if (d.matches("^\\d{2}\\d{8}$")) {
-            String withNine = d.substring(0, 2) + "9" + d.substring(2);
-            out.add(withNine);
-            out.add("55" + d);
-            out.add("55" + withNine);
-        }
-
-        return out;
+        return PhoneNumberVariants.digitsOnly(s);
     }
 
     private static boolean notBlank(String s) {

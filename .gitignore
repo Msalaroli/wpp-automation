@@ -64,6 +64,7 @@ logs/
 
 ### Database dumps / backups ###
 *.sql
+!src/main/resources/db/migration/*.sql
 *.dump
 *.backup
 backup/

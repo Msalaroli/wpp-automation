@@ -69,3 +69,6 @@ app:
 
   commercial:
     allowed-numbers: ${COMMERCIAL_ALLOWED_NUMBERS:}
+
+  chatwoot:
+    mirror-inbound-enabled: ${CHATWOOT_MIRROR_INBOUND_ENABLED:true}

@@ -13,6 +13,7 @@ import java.util.List;
 public class WppAutomationProperties {
 
     private Commercial commercial = new Commercial();
+    private Chatwoot chatwoot = new Chatwoot();
 
     public static class Commercial {
 
@@ -24,6 +25,19 @@ public class WppAutomationProperties {
 
         public void setAllowedNumbers(List<String> allowedNumbers) {
             this.allowedNumbers = allowedNumbers;
+        }
+    }
+
+    public static class Chatwoot {
+
+        private boolean mirrorInboundEnabled = true;
+
+        public boolean isMirrorInboundEnabled() {
+            return mirrorInboundEnabled;
+        }
+
+        public void setMirrorInboundEnabled(boolean mirrorInboundEnabled) {
+            this.mirrorInboundEnabled = mirrorInboundEnabled;
         }
     }
 }

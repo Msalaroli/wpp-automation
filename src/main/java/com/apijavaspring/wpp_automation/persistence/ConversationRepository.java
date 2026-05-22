@@ -5,7 +5,10 @@ import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
 
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 
 @Repository
@@ -24,22 +27,46 @@ public class ConversationRepository {
                 WHERE wa_id = :waId
                 """,
                 new MapSqlParameterSource().addValue("waId", waId),
-                (rs, n) -> new Conversation(
-                        rs.getString("wa_id"),
-                        rs.getString("reservation_id"),
-                        rs.getString("listing_id"),
-                        rs.getString("state"),
-                        rs.getTimestamp("window_open_until") == null ? null : rs.getTimestamp("window_open_until").toInstant(),
-                        rs.getTimestamp("last_user_message_at") == null ? null : rs.getTimestamp("last_user_message_at").toInstant(),
-                        rs.getTimestamp("last_bot_message_at") == null ? null : rs.getTimestamp("last_bot_message_at").toInstant(),
-                        rs.getBoolean("human_handoff"),
-                        rs.getTimestamp("created_at").toInstant(),
-                        rs.getTimestamp("updated_at").toInstant(),
-                        rs.getInt("version")
-                )
+                (rs, n) -> mapConversation(rs)
         );
 
         return rows.isEmpty() ? null : rows.get(0);
+    }
+
+    public Conversation findByWaIdVariants(Collection<String> variants) {
+        if (variants == null || variants.isEmpty()) return null;
+
+        List<Conversation> rows = jdbc.query(
+                """
+                SELECT wa_id, reservation_id, listing_id, state,
+                       window_open_until, last_user_message_at, last_bot_message_at,
+                       human_handoff, created_at, updated_at, version
+                FROM ops.conversations
+                WHERE wa_id IN (:variants)
+                ORDER BY human_handoff DESC, updated_at DESC
+                LIMIT 1
+                """,
+                new MapSqlParameterSource().addValue("variants", variants),
+                (rs, n) -> mapConversation(rs)
+        );
+
+        return rows.isEmpty() ? null : rows.get(0);
+    }
+
+    private Conversation mapConversation(ResultSet rs) throws SQLException {
+        return new Conversation(
+                rs.getString("wa_id"),
+                rs.getString("reservation_id"),
+                rs.getString("listing_id"),
+                rs.getString("state"),
+                rs.getTimestamp("window_open_until") == null ? null : rs.getTimestamp("window_open_until").toInstant(),
+                rs.getTimestamp("last_user_message_at") == null ? null : rs.getTimestamp("last_user_message_at").toInstant(),
+                rs.getTimestamp("last_bot_message_at") == null ? null : rs.getTimestamp("last_bot_message_at").toInstant(),
+                rs.getBoolean("human_handoff"),
+                rs.getTimestamp("created_at").toInstant(),
+                rs.getTimestamp("updated_at").toInstant(),
+                rs.getInt("version")
+        );
     }
 
     // Mantidos (podem ser úteis depois)

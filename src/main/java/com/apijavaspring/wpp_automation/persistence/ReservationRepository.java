@@ -1,12 +1,12 @@
 package com.apijavaspring.wpp_automation.persistence;
 
+import com.apijavaspring.wpp_automation.core.PhoneNumberVariants;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
 
-import java.util.LinkedHashSet;
-import java.util.Set;
+import java.util.List;
 
 @Repository
 @RequiredArgsConstructor
@@ -15,10 +15,7 @@ public class ReservationRepository {
     private final NamedParameterJdbcTemplate jdbc;
 
     public ReservationRef findByHolderPhone(String waIdRaw) {
-        String digits = onlyDigits(waIdRaw);
-        if (digits.isBlank()) return null;
-
-        Set<String> variants = phoneVariants(digits);
+        List<String> variants = PhoneNumberVariants.brazilianVariants(waIdRaw);
         if (variants.isEmpty()) return null;
 
         var rows = jdbc.query(
@@ -48,10 +45,7 @@ public class ReservationRepository {
     }
 
     public ReservationRef findCurrentOrFutureByHolderPhone(String waIdRaw) {
-        String digits = onlyDigits(waIdRaw);
-        if (digits.isBlank()) return null;
-
-        Set<String> variants = phoneVariants(digits);
+        List<String> variants = PhoneNumberVariants.brazilianVariants(waIdRaw);
         if (variants.isEmpty()) return null;
 
         var rows = jdbc.query(
@@ -104,33 +98,6 @@ public class ReservationRepository {
         );
 
         return Boolean.TRUE.equals(operational);
-    }
-
-    private static String onlyDigits(String s) {
-        return s == null ? "" : s.replaceAll("\\D", "");
-    }
-
-    private static Set<String> phoneVariants(String digits) {
-        LinkedHashSet<String> out = new LinkedHashSet<>();
-
-        String d = onlyDigits(digits);
-        if (d.isBlank()) return out;
-
-        out.add(d);
-
-        // Brasil com país + DDD + 8 dígitos locais (sem o 9)
-        // ex: 557188431484 -> vira 5571988431484
-        if (d.matches("^55\\d{10}$")) {
-            out.add(d.substring(0, 4) + "9" + d.substring(4));
-        }
-
-        // Brasil com país + DDD + 9 dígitos locais (com o 9)
-        // ex: 5571988431484 -> vira 557188431484
-        if (d.matches("^55\\d{11}$") && d.charAt(4) == '9') {
-            out.add(d.substring(0, 4) + d.substring(5));
-        }
-
-        return out;
     }
 
     public record ReservationRef(String reservationId, String listingId, String holderName, String holderPhone) {}
