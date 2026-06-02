@@ -20,7 +20,8 @@ public class ReservationRepository {
 
         var rows = jdbc.query(
                 """
-                SELECT reservation_id, listing_id, holder_name, holder_phone
+                SELECT reservation_id, listing_id, holder_name, holder_phone,
+                       status_coleta
                 FROM public.stays_reservas
                 WHERE regexp_replace(holder_phone, '\\D', '', 'g') IN (:phoneDigitsList)
                 ORDER BY
@@ -37,7 +38,8 @@ public class ReservationRepository {
                         rs.getString("reservation_id"),
                         rs.getString("listing_id"),
                         rs.getString("holder_name"),
-                        rs.getString("holder_phone")
+                        rs.getString("holder_phone"),
+                        rs.getString("status_coleta")
                 )
         );
 
@@ -50,7 +52,8 @@ public class ReservationRepository {
 
         var rows = jdbc.query(
                 """
-                SELECT reservation_id, listing_id, holder_name, holder_phone
+                SELECT reservation_id, listing_id, holder_name, holder_phone,
+                       status_coleta
                 FROM public.stays_reservas
                 WHERE regexp_replace(holder_phone, '\\D', '', 'g') IN (:phoneDigitsList)
                   AND checkout_date >= current_date
@@ -69,7 +72,8 @@ public class ReservationRepository {
                         rs.getString("reservation_id"),
                         rs.getString("listing_id"),
                         rs.getString("holder_name"),
-                        rs.getString("holder_phone")
+                        rs.getString("holder_phone"),
+                        rs.getString("status_coleta")
                 )
         );
 
@@ -100,5 +104,11 @@ public class ReservationRepository {
         return Boolean.TRUE.equals(operational);
     }
 
-    public record ReservationRef(String reservationId, String listingId, String holderName, String holderPhone) {}
+    public record ReservationRef(
+            String reservationId,
+            String listingId,
+            String holderName,
+            String holderPhone,
+            String statusColeta
+    ) {}
 }

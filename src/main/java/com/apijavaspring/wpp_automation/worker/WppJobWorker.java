@@ -156,7 +156,12 @@ public class WppJobWorker {
             }
 
             // 2) identifica reserva se ainda não identificou
-            handleIdentifyAndStartFlow(canonicalWaId);
+            IdentificationResult identificationResult = handleIdentifyAndStartFlow(canonicalWaId);
+            if (identificationResult == IdentificationResult.ASKED_IDENTIFICATION) {
+                markInboxProcessed(inboxId);
+                markJobOk(job.jobId());
+                return true;
+            }
 
             // 3) carrega conversa atualizada e executa regras por estado
             var conv = conversationRepository.findByWaId(canonicalWaId);
@@ -195,11 +200,13 @@ public class WppJobWorker {
             return false;
         }
 
+        String nextState = initialStateForReservation(ref);
+
         boolean changed = conversationRepository.replaceReservationAndResetState(
                 waIdRaw,
                 ref.reservationId(),
                 ref.listingId(),
-                "collecting_docs_init"
+                nextState
         );
 
         if (changed) {
@@ -207,7 +214,7 @@ public class WppJobWorker {
                     ref.reservationId(),
                     digitsOnly(waIdRaw),
                     ref.holderName(),
-                    "collecting_docs_init",
+                    nextState,
                     "{}"
             );
         }
@@ -282,16 +289,16 @@ public class WppJobWorker {
         return false;
     }
 
-    private void handleIdentifyAndStartFlow(String waIdRaw) {
+    private IdentificationResult handleIdentifyAndStartFlow(String waIdRaw) {
         String waDigits = digitsOnly(waIdRaw);
 
         var conv = conversationRepository.findByWaId(waIdRaw);
-        if (conv == null) return;
+        if (conv == null) return IdentificationResult.NONE;
 
-        if (conv.humanHandoff()) return;
+        if (conv.humanHandoff()) return IdentificationResult.NONE;
 
         if (conv.reservationId() != null && !conv.reservationId().isBlank()) {
-            return;
+            return IdentificationResult.NONE;
         }
 
         var ref = reservationRepository.findCurrentOrFutureByHolderPhone(waIdRaw);
@@ -308,15 +315,18 @@ public class WppJobWorker {
                         "unknown_reservation",
                         "{}"
                 );
+                return IdentificationResult.ASKED_IDENTIFICATION;
             }
-            return;
+            return IdentificationResult.NONE;
         }
+
+        String nextState = initialStateForReservation(ref);
 
         boolean changed = conversationRepository.setReservationAndStateIfChanged(
                 waIdRaw,
                 ref.reservationId(),
                 ref.listingId(),
-                "collecting_docs_init"
+                nextState
         );
 
         if (changed) {
@@ -324,10 +334,19 @@ public class WppJobWorker {
                     ref.reservationId(),
                     waDigits,
                     ref.holderName(),
-                    "collecting_docs_init",
+                    nextState,
                     "{}"
             );
         }
+
+        return changed ? IdentificationResult.LINKED_RESERVATION : IdentificationResult.NONE;
+    }
+
+    private String initialStateForReservation(ReservationRepository.ReservationRef ref) {
+        if ("ok".equalsIgnoreCase(safe(ref.statusColeta()))) {
+            return "faq_ia";
+        }
+        return "collecting_docs_init";
     }
 
     private void handleUnknownReservationInbound(ConversationRepository.Conversation conv, InboxRow inbox) {
@@ -635,6 +654,12 @@ public class WppJobWorker {
     }
 
     private record JobRow(UUID jobId, UUID inboxId, String waId, int attempts) {}
+
+    private enum IdentificationResult {
+        NONE,
+        LINKED_RESERVATION,
+        ASKED_IDENTIFICATION
+    }
 
     private record InboxRow(
             UUID id,
