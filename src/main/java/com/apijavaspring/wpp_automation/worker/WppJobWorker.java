@@ -22,6 +22,7 @@ import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -378,22 +379,40 @@ public class WppJobWorker {
 
         if (conv.reservationId() == null || conv.reservationId().isBlank()) return;
 
-        if (notBlank(inbox.mediaId())) {
+        String messageType = safe(inbox.messageType())
+                .trim()
+                .toLowerCase(Locale.ROOT);
 
-            String tipo = switch (safe(inbox.messageType())) {
-                case "image" -> "imagem";
-                case "document" -> "documento";
-                case "audio" -> "audio";
-                case "video" -> "video";
-                default -> "midia";
-            };
+        String mimeType = safe(inbox.mimeType())
+                .split(";", 2)[0]
+                .trim()
+                .toLowerCase(Locale.ROOT);
+
+        boolean acceptedMessageType =
+                "image".equals(messageType)
+                        || "document".equals(messageType);
+
+        boolean acceptedMimeType =
+                "image/jpeg".equals(mimeType)
+                        || "image/png".equals(mimeType)
+                        || "application/pdf".equals(mimeType);
+
+        boolean validDocsMedia =
+                acceptedMessageType
+                        && acceptedMimeType
+                        && notBlank(inbox.mediaId());
+
+        if (validDocsMedia) {
+            String tipo = "image".equals(messageType)
+                    ? "imagem"
+                    : "documento";
 
             UUID uploadId = docUploadRepository.insertPendingWhatsAppUpload(
                     conv.reservationId(),
                     tipo,
                     inbox.messageId(),
                     inbox.mediaId(),
-                    inbox.mimeType(),
+                    mimeType,
                     inbox.mediaSha256()
             );
 
@@ -403,7 +422,7 @@ public class WppJobWorker {
                     "wa_id", conv.waId(),
                     "message_id", inbox.messageId(),
                     "media_id", inbox.mediaId(),
-                    "mime_type", inbox.mimeType(),
+                    "mime_type", mimeType,
                     "sha256", inbox.mediaSha256()
             );
 
@@ -417,13 +436,13 @@ public class WppJobWorker {
             return;
         }
 
-        if ("text".equals(safe(inbox.messageType()))) {
+        if (!"text".equals(messageType)) {
             String payloadJson = payloadJson(
                     "reservation_id", conv.reservationId(),
                     "wa_id", conv.waId(),
                     "inbox_id", inbox.id(),
                     "message_id", inbox.messageId(),
-                    "text", inbox.textBody()
+                    "text", "[Mídia recebida durante a coleta de documentos]"
             );
 
             n8nJobRepository.enqueueCollectingDocsTextJob(
@@ -432,7 +451,24 @@ public class WppJobWorker {
                     conv.waId(),
                     payloadJson
             );
+
+            return;
         }
+
+        String payloadJson = payloadJson(
+                "reservation_id", conv.reservationId(),
+                "wa_id", conv.waId(),
+                "inbox_id", inbox.id(),
+                "message_id", inbox.messageId(),
+                "text", inbox.textBody()
+        );
+
+        n8nJobRepository.enqueueCollectingDocsTextJob(
+                inbox.id(),
+                conv.reservationId(),
+                conv.waId(),
+                payloadJson
+        );
     }
 
     private void handleFaqIaInbound(ConversationRepository.Conversation conv, InboxRow inbox) {

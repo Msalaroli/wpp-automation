@@ -1,6 +1,7 @@
 package com.apijavaspring.wpp_automation.persistence;
 
 import com.apijavaspring.wpp_automation.config.WppAutomationProperties;
+import com.apijavaspring.wpp_automation.core.PhoneNumberVariants;
 import com.apijavaspring.wpp_automation.web.dto.InboundEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -20,6 +21,7 @@ public class InboxRepository {
 
     private final NamedParameterJdbcTemplate jdbc;
     private final ChatwootInboundQueueRepository chatwootInboundQueueRepository;
+    private final ConversationRepository conversationRepository;
     private final WppAutomationProperties properties;
 
     @Transactional
@@ -65,7 +67,12 @@ public class InboxRepository {
             throw new IllegalStateException("Inbox id not found for message_id=" + e.messageId());
         }
 
-        enqueueChatwootInboundMirrorSafely(inboxId);
+        if (shouldEnqueueChatwootInbound(e)) {
+            enqueueChatwootInboundMirrorSafely(inboxId);
+        } else {
+            log.debug("Deferring Chatwoot inbound mirror until FAQ/IA enrichment inboxId={} messageType={}",
+                    inboxId, e.messageType());
+        }
 
         jdbc.update(
                 """
@@ -81,6 +88,31 @@ public class InboxRepository {
         );
 
         return inboxId;
+    }
+
+    private boolean shouldEnqueueChatwootInbound(InboundEvent event) {
+        if (notBlank(event.textBody())) {
+            return true;
+        }
+
+        if (!isAudioOrImage(event.messageType())) {
+            return true;
+        }
+
+        var conversation = conversationRepository.findByWaIdVariants(
+                PhoneNumberVariants.brazilianVariants(event.waId())
+        );
+
+        return conversation == null || !"faq_ia".equals(conversation.state());
+    }
+
+    private static boolean isAudioOrImage(String messageType) {
+        return "audio".equalsIgnoreCase(messageType)
+                || "image".equalsIgnoreCase(messageType);
+    }
+
+    private static boolean notBlank(String value) {
+        return value != null && !value.isBlank();
     }
 
     private void enqueueChatwootInboundMirrorSafely(UUID inboxId) {
