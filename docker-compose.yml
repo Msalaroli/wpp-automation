@@ -24,7 +24,10 @@ services:
         max-size: "50m"
         max-file: "7"
     networks:
-      - app-net
+      app-net:
+        aliases:
+          - wpp-automation
+          - bemvindo-java
 
 networks:
   app-net:
