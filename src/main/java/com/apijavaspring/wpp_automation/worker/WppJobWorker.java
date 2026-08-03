@@ -197,7 +197,11 @@ public class WppJobWorker {
         if (ref == null) {
             return resetToUnknownReservation(waIdRaw);
         }
-        if (safe(ref.reservationId()).equals(safe(conv.reservationId()))) {
+
+        if (ConversationRepository.sameReservationId(
+                ref.reservationId(),
+                conv.reservationId()
+        )) {
             return false;
         }
 
@@ -298,7 +302,9 @@ public class WppJobWorker {
 
         if (conv.humanHandoff()) return IdentificationResult.NONE;
 
-        if (conv.reservationId() != null && !conv.reservationId().isBlank()) {
+        if (ConversationRepository.normalizeReservationId(
+                conv.reservationId()
+        ) != null) {
             return IdentificationResult.NONE;
         }
 

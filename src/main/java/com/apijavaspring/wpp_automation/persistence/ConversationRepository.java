@@ -123,20 +123,80 @@ public class ConversationRepository {
     }
 
     public boolean setReservationAndStateIfChanged(String waId, String reservationId, String listingId, String newState) {
+        String normalizedReservationId = normalizeReservationId(reservationId);
+
         int updated = jdbc.update(
                 """
                 UPDATE ops.conversations
-                SET reservation_id = COALESCE(reservation_id, :reservationId),
-                    listing_id     = COALESCE(listing_id, :listingId),
+                SET reservation_id = CASE
+                      WHEN (
+                        reservation_id IS NULL
+                        OR btrim(reservation_id) = ''
+                        OR lower(btrim(reservation_id)) = 'null'
+                      )
+                      AND :reservationId IS NOT NULL
+                      THEN :reservationId
+                      ELSE reservation_id
+                    END,
+                    listing_id = CASE
+                      WHEN (
+                        reservation_id IS NULL
+                        OR btrim(reservation_id) = ''
+                        OR lower(btrim(reservation_id)) = 'null'
+                      )
+                      AND :reservationId IS NOT NULL
+                      THEN :listingId
+                      ELSE COALESCE(listing_id, :listingId)
+                    END,
                     state          = :newState,
+                    docs_first_received_at = CASE
+                      WHEN (
+                        reservation_id IS NULL
+                        OR btrim(reservation_id) = ''
+                        OR lower(btrim(reservation_id)) = 'null'
+                      )
+                      AND :reservationId IS NOT NULL
+                      THEN NULL
+                      ELSE docs_first_received_at
+                    END,
+                    docs_last_prompt = CASE
+                      WHEN (
+                        reservation_id IS NULL
+                        OR btrim(reservation_id) = ''
+                        OR lower(btrim(reservation_id)) = 'null'
+                      )
+                      AND :reservationId IS NOT NULL
+                      THEN NULL
+                      ELSE docs_last_prompt
+                    END,
+                    docs_last_prompt_at = CASE
+                      WHEN (
+                        reservation_id IS NULL
+                        OR btrim(reservation_id) = ''
+                        OR lower(btrim(reservation_id)) = 'null'
+                      )
+                      AND :reservationId IS NOT NULL
+                      THEN NULL
+                      ELSE docs_last_prompt_at
+                    END,
                     updated_at     = now(),
                     version        = version + 1
                 WHERE wa_id = :waId
-                  AND state <> :newState
+                  AND (
+                    state <> :newState
+                    OR (
+                      (
+                        reservation_id IS NULL
+                        OR btrim(reservation_id) = ''
+                        OR lower(btrim(reservation_id)) = 'null'
+                      )
+                      AND :reservationId IS NOT NULL
+                    )
+                  )
                 """,
                 new MapSqlParameterSource()
                         .addValue("waId", waId)
-                        .addValue("reservationId", reservationId)
+                        .addValue("reservationId", normalizedReservationId)
                         .addValue("listingId", listingId)
                         .addValue("newState", newState)
         );
@@ -144,6 +204,8 @@ public class ConversationRepository {
     }
 
     public boolean replaceReservationAndResetState(String waId, String reservationId, String listingId, String newState) {
+        String normalizedReservationId = normalizeReservationId(reservationId);
+
         int updated = jdbc.update(
                 """
                 UPDATE ops.conversations
@@ -151,18 +213,51 @@ public class ConversationRepository {
                     listing_id     = :listingId,
                     state          = :newState,
                     human_handoff  = false,
+                    docs_first_received_at = null,
+                    docs_last_prompt = null,
+                    docs_last_prompt_at = null,
                     updated_at     = now(),
                     version        = version + 1
                 WHERE wa_id = :waId
-                  AND reservation_id IS DISTINCT FROM :reservationId
+                  AND :reservationId IS NOT NULL
+                  AND (
+                    reservation_id IS NULL
+                    OR btrim(reservation_id) = ''
+                    OR lower(btrim(reservation_id)) = 'null'
+                    OR lower(btrim(reservation_id)) <> lower(:reservationId)
+                  )
                 """,
                 new MapSqlParameterSource()
                         .addValue("waId", waId)
-                        .addValue("reservationId", reservationId)
+                        .addValue("reservationId", normalizedReservationId)
                         .addValue("listingId", listingId)
                         .addValue("newState", newState)
         );
         return updated == 1;
+    }
+
+    public static String normalizeReservationId(String reservationId) {
+        if (reservationId == null) {
+            return null;
+        }
+
+        String normalized = reservationId.trim();
+        if (normalized.isEmpty() || "null".equalsIgnoreCase(normalized)) {
+            return null;
+        }
+
+        return normalized;
+    }
+
+    public static boolean sameReservationId(String first, String second) {
+        String normalizedFirst = normalizeReservationId(first);
+        String normalizedSecond = normalizeReservationId(second);
+
+        if (normalizedFirst == null || normalizedSecond == null) {
+            return normalizedFirst == null && normalizedSecond == null;
+        }
+
+        return normalizedFirst.equalsIgnoreCase(normalizedSecond);
     }
 
     public boolean resetToUnknownReservation(String waId) {
