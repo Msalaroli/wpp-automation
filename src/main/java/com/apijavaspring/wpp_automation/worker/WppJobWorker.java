@@ -214,15 +214,13 @@ public class WppJobWorker {
                 nextState
         );
 
-        if (changed) {
-            messageQueueRepository.enqueueRealtimeEvent(
-                    ref.reservationId(),
-                    digitsOnly(waIdRaw),
-                    ref.holderName(),
-                    nextState,
-                    "{}"
-            );
-        }
+        enqueueRealtimeTransitionIfApplicable(
+                changed,
+                ref.reservationId(),
+                digitsOnly(waIdRaw),
+                ref.holderName(),
+                nextState
+        );
 
         return changed;
     }
@@ -336,15 +334,13 @@ public class WppJobWorker {
                 nextState
         );
 
-        if (changed) {
-            messageQueueRepository.enqueueRealtimeEvent(
-                    ref.reservationId(),
-                    waDigits,
-                    ref.holderName(),
-                    nextState,
-                    "{}"
-            );
-        }
+        enqueueRealtimeTransitionIfApplicable(
+                changed,
+                ref.reservationId(),
+                waDigits,
+                ref.holderName(),
+                nextState
+        );
 
         return changed ? IdentificationResult.LINKED_RESERVATION : IdentificationResult.NONE;
     }
@@ -354,6 +350,26 @@ public class WppJobWorker {
             return "faq_ia";
         }
         return "collecting_docs_init";
+    }
+
+    void enqueueRealtimeTransitionIfApplicable(
+            boolean changed,
+            String reservationId,
+            String waDigits,
+            String holderName,
+            String nextState
+    ) {
+        if (!changed || "faq_ia".equals(nextState)) {
+            return;
+        }
+
+        messageQueueRepository.enqueueRealtimeEvent(
+                reservationId,
+                waDigits,
+                holderName,
+                nextState,
+                "{}"
+        );
     }
 
     private void handleUnknownReservationInbound(ConversationRepository.Conversation conv, InboxRow inbox) {
